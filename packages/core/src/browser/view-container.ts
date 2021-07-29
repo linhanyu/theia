@@ -30,7 +30,7 @@ import { FrontendApplicationStateService } from './frontend-application-state';
 import { ContextMenuRenderer, Anchor } from './context-menu-renderer';
 import { parseCssMagnitude } from './browser';
 import { WidgetManager } from './widget-manager';
-import { TabBarToolbarRegistry, TabBarToolbarFactory, TabBarToolbar, TabBarDelegator } from './shell/tab-bar-toolbar';
+import { TabBarToolbarRegistry, TabBarToolbarFactory, TabBarToolbar, TabBarDelegator, TabBarToolbarItem } from './shell/tab-bar-toolbar';
 import { Key } from './keys';
 import { ProgressBarFactory } from './progress-bar-factory';
 
@@ -210,28 +210,7 @@ export class ViewContainer extends BaseWidget implements StatefulWidget, Applica
         } else {
             visibleParts.forEach(part => part.showTitle());
         }
-        if (allParts.length > 1) {
-            for (const part of allParts) {
-                const newId = `__toggle-visibility-toolbar-item-${this.id}:${part.wrapped.id}`;
-                const existingId = this.toggleVisibilityCommandId(part);
-                const existingHandler = this.commandRegistry.getAllHandlers(existingId)[0];
-                const existingCommand = this.commandRegistry.getCommand(existingId);
-                if (existingHandler && existingCommand) {
-                    this.toDisposeOnUpdateTitle.push(this.commandRegistry.registerCommand({ ...existingCommand, id: newId }, {
-                        execute: () => existingHandler.execute(),
-                        isToggled: () => !!existingHandler.isToggled?.(),
-                        isEnabled: () => part.canHide,
-                        isVisible: widget => widget === this.getTabBarDelegate()
-                    }));
-                    this.toDisposeOnUpdateTitle.push(this.toolbarRegistry.registerItem({
-                        id: newId,
-                        command: newId,
-                        group: 'view',
-                        tooltip: part.wrapped.title.caption || part.wrapped.title.label,
-                    }));
-                }
-            }
-        }
+        this.updateToolbarItems(allParts);
         const caption = title.caption || title.label;
         if (caption) {
             this.title.caption = caption;
@@ -247,6 +226,40 @@ export class ViewContainer extends BaseWidget implements StatefulWidget, Applica
         }
         if (title.closeable !== undefined) {
             this.title.closable = title.closeable;
+        }
+    }
+
+    protected updateToolbarItems(allParts: ViewContainerPart[]): void {
+        if (allParts.length > 1) {
+            const group = this.getToggleVisibilityGroupLabel();
+            for (const part of allParts) {
+                const existingId = this.toggleVisibilityCommandId(part);
+                const { caption, label } = part.wrapped.title;
+                this.registerToolbarItem(existingId, { tooltip: caption || label, group });
+            }
+        }
+    }
+
+    protected getToggleVisibilityGroupLabel(): string {
+        return 'view';
+    }
+
+    protected registerToolbarItem(commandId: string, options?: Partial<Omit<TabBarToolbarItem, 'id' | 'command'>>): void {
+        const newId = `${this.id}-tabbar-toolbar-${commandId}`;
+        const existingHandler = this.commandRegistry.getAllHandlers(commandId)[0];
+        const existingCommand = this.commandRegistry.getCommand(commandId);
+        if (existingHandler && existingCommand) {
+            this.toDisposeOnUpdateTitle.push(this.commandRegistry.registerCommand({ ...existingCommand, id: newId }, {
+                execute: (w, ...args) => this.commandRegistry.executeCommand(commandId, ...args),
+                isToggled: (w, ...args) => this.commandRegistry.isToggled(commandId, ...args),
+                isEnabled: (w, ...args) => this.commandRegistry.isEnabled(commandId, ...args),
+                isVisible: (w, ...args) => w === this.getTabBarDelegate() && this.commandRegistry.isVisible(commandId, ...args),
+            }));
+            this.toDisposeOnUpdateTitle.push(this.toolbarRegistry.registerItem({
+                ...options,
+                id: newId,
+                command: newId,
+            }));
         }
     }
 
